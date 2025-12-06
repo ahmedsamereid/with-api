@@ -3,23 +3,22 @@ require('dotenv').config();
 const { getVisitContext, isPrivateIP, hashSha256, shouldSendForIp } = require('../lib/utils');
 const { sendVisitEmail } = require('../lib/email');
 
-// قايمة فيديوهات يوتيوب (كل مرة هيختار واحد عشوائي)
+// قايمة فيديوهات يوتيوب عشوائية
 const YOUTUBE_VIDEOS = [
-  'https://www.youtube.com/watch?v=dQw4w9WgXcQ',           // Rick Astley - Never Gonna Give You Up
-  'https://www.youtube.com/watch?v=9bZkp7q19f0',           // PSY - GANGNAM STYLE
-  'https://www.youtube.com/watch?v=kJQP7kiw5Fk',           // Luis Fonsi - Despacito
-  'https://www.youtube.com/watch?v=OPf0YbXqDm0',           // UK Drill
-  'https://www.youtube.com/watch?v=CevxZvSJLk8',           // Russian Cat
-  'https://www.youtube.com/watch?v=jNQXAC9IVRw',           // Me at the zoo
-  'https://www.youtube.com/watch?v=Z0Uh3OJCx3o',           // Nyan Cat
-  'https://www.youtube.com/watch?v=UBX5Hk0V2nE',           // Shrek Retold
-  'https://www.youtube.com/watch?v=60ItHLz5WEA',           // Charlie bit my finger
-  'https://www.youtube.com/watch?v=kffacxfA7G4',           // Baby Shark (لو عايز تعذب الناس)
-  // أضف أي فيديوهات تانية هنا
+  'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  'https://www.youtube.com/watch?v=9bZkp7q19f0',
+  'https://www.youtube.com/watch?v=kJQP7kiw5Fk',
+  'https://www.youtube.com/watch?v=OPf0YbXqDm0',
+  'https://www.youtube.com/watch?v=CevxZvSJLk8',
+  'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+  'https://www.youtube.com/watch?v=Z0Uh3OJCx3o',
+  'https://www.youtube.com/watch?v=kffacxfA7G4',
+  'https://www.youtube.com/watch?v=60ItHLz5WEA',
+  // أضف اللي إنت عايزه
 ];
 
 module.exports = async (req, res) => {
-  // دعم HEAD requests (للـ uptime monitors)
+  // دعم HEAD requests
   if (req.method === 'HEAD') {
     res.statusCode = 200;
     return res.end();
@@ -32,10 +31,23 @@ module.exports = async (req, res) => {
 
   const ctx = getVisitContext(req);
 
-  // بناء الـ payload من الـ query params
-  const proto = String(req.headers['x-forwarded-proto'] || 'https');
-  const urlObj = new URL(`\( {proto}:// \){req.headers.host}${req.url || '/'}`);
-  const qp = urlObj.searchParams;
+  // ==== الجزء اللي كان بيعمل المشكلة ====
+  let qp;
+  try {
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers.host || 'localhost';
+    // نستخدم path نظيف (بدون favicon.ico وغيره)
+    const cleanPath = req.url.split('?')[0]; // نأخذ الجزء قبل الـ query string
+    const pathToUse = (cleanPath === '/' || cleanPath === '/index.js' || cleanPath === '') ? '/' : cleanPath;
+
+    const fullUrl = `\( {proto}:// \){host}\( {pathToUse} \){req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''}`;
+    const urlObj = new URL(fullUrl);
+    qp = urlObj.searchParams;
+  } catch (err) {
+    // لو حصل أي مشكلة في الـ URL (زي طلب favicon.ico من غير host)، نستخدم query params من req.url مباشرة
+    qp = new URLSearchParams(req.url.split('?')[1] || '');
+  }
+  // ========================================
 
   const payload = {
     utm: {
@@ -49,7 +61,7 @@ module.exports = async (req, res) => {
     sessionId: qp.get('sessionId') || null,
   };
 
-  // إرسال الإيميل في الخلفية (التراكينج لسه شغال تمام)
+  // إرسال الإيميل في الخلفية
   const ip = ctx.clientIP;
   const canSend = shouldSendForIp(ip);
   if (canSend && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
@@ -63,13 +75,13 @@ module.exports = async (req, res) => {
     })();
   }
 
-  // اختيار فيديو يوتيوب عشوائي
+  // اختيار فيديو عشوائي
   const randomVideo = YOUTUBE_VIDEOS[Math.floor(Math.random() * YOUTUBE_VIDEOS.length)];
 
-  // ريدايركت فوري بدون أي UI أو HTML
+  // ريدايركت فوري
   res.statusCode = 302;
   res.setHeader('Location', randomVideo);
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.end();
