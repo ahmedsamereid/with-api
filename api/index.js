@@ -1,6 +1,15 @@
 
 // api/index.js
-require('dotenv').config();
+
+// حمّل dotenv اختياريًا للتطوير المحلي فقط
+if (process.env.VERCEL !== '1') {
+  try {
+    require('dotenv').config();
+  } catch (e) {
+    console.warn('dotenv not loaded (likely running in production on Vercel).');
+  }
+}
+
 const { getVisitContext, shouldSendForIp } = require('../lib/utils');
 const { sendVisitEmail } = require('../lib/email');
 
@@ -26,7 +35,17 @@ module.exports = async (req, res) => {
 
   // بناء الـ payload من Query فقط (صامت)
   const proto = String(req.headers['x-forwarded-proto'] || 'https');
-  const urlObj = new URL(`${proto}://${req.headers.host}${req.url || '/'}`);
+  const host = req.headers.host || '';
+  const url = req.url || '/';
+  let urlObj;
+
+  try {
+    urlObj = new URL(`${proto}://${host}${url}`);
+  } catch {
+    // في حالة أي مسار غير متوقع، نضمن استمرار التنفيذ بدون كراش
+    urlObj = new URL(`${proto}://${host}/`);
+  }
+
   const qp = urlObj.searchParams;
 
   const payload = {
@@ -44,20 +63,25 @@ module.exports = async (req, res) => {
   // تهدئة + شرط وجود المتغيرات السرية
   const ip = ctx.clientIP;
   const canSend = shouldSendForIp(ip);
-  if (canSend && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
+
+  const { EMAIL_TO, EMAIL_USER, EMAIL_APP_PASSWORD } = process.env;
+  const hasSecrets = Boolean(EMAIL_TO && EMAIL_USER && EMAIL_APP_PASSWORD);
+
+  if (canSend && hasSecrets) {
     // إرسال صامت في الخلفية (من غير أي إشارة للزائر)
     (async () => {
       try {
         await sendVisitEmail({ payload, context: ctx });
-        // يمكن الإبقاء على هذا اللوج للتشخيص؛ لو عايز صمت كامل، أشيله.
+        // لو عايز صمت كامل، احذف اللوج التالي:
         console.log(`[EMAIL] sent silently for ${ip}`);
       } catch (err) {
-        console.error('[EMAIL] failed:', err.message);
+        // لوج بسيط للتشخيص بدون كشف أسرار
+        console.error('[EMAIL] failed:', err?.message || err);
       }
     })();
   }
 
-  // === اختر واحد من الردود الصامتة أدناه ===
+  // اختر أحد الردود الصامتة:
 
   // (أ) رد 204 No Content (صمت تام بلا أي UI)
   // res.statusCode = 204;
