@@ -5,14 +5,14 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node api/index.js",   // محليًا فقط
-    "dev": "vercel dev"             // محاكاة Vercel محليًا
+    "start": "node api/index.js",
+    "dev": "vercel dev"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "nodemailer": "^6.9.8"
+    "express": "4.18.2",
+    "nodemailer": "6.9.8"
   },
   "devDependencies": {
-    "vercel": "^34.0.0"
+    "vercel": "34.0.0"
   }
 }
