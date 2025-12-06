@@ -10,10 +10,12 @@ const YOUTUBE_VIDEOS = [
   'https://www.youtube.com/watch?v=OPf0YbXqDm0',
   'https://www.youtube.com/watch?v=CevxZvSJLk8',
   'https://www.youtube.com/watch?v=kffacxfA7G4',
-  // أضف اللي تحبه
+  'https://www.youtube.com/watch?v=MtN1YnoL46Q',
+  'https://www.youtube.com/watch?v=j5a0jTc9S10',
 ];
 
 module.exports = async (req, res) => {
+  // دعم HEAD requests (للـ health checks)
   if (req.method === 'HEAD') {
     res.statusCode = 200;
     return res.end();
@@ -26,15 +28,12 @@ module.exports = async (req, res) => {
 
   const ctx = getVisitContext(req);
 
-  // ==== إصلاح الـ URL زي ما عملنا قبل كده ====
+  // استخراج query params بطريقة مثالية ومضمونة
   let qp;
   try {
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers.host || 'localhost';
-    const cleanPath = req.url.split('?')[0];
-    const pathToUse = (cleanPath === '/' || cleanPath === '') ? '/' : cleanPath;
-    const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
-    const fullUrl = `\( {proto}:// \){host}\( {pathToUse} \){queryString}`;
+    const proto = req.headers['x-forwarded-proto']?.split(',')[0].trim() || 'https';
+    const host = req.headers.host || 'localhost:3000';
+    const fullUrl = `\( {proto}:// \){host}${req.url}`;
     qp = new URL(fullUrl).searchParams;
   } catch {
     qp = new URLSearchParams(req.url.split('?')[1] || '');
@@ -42,35 +41,34 @@ module.exports = async (req, res) => {
 
   const payload = {
     utm: {
-      source: qp.get('utm_source') || null,
-      medium: qp.get('utm_medium') || null,
-      campaign: qp.get('utm_campaign') || null,
-      term: qp.get('utm_term') || null,
-      content: qp.get('utm_content') || null,
+      source: qp.get('utm_source'),
+      medium: qp.get('utm_medium'),
+      campaign: qp.get('utm_campaign'),
+      term: qp.get('utm_term'),
+      content: qp.get('utm_content'),
     },
-    userId: qp.get('userId') || null,
-    sessionId: qp.get('sessionId') || null,
+    userId: qp.get('userId'),
+    sessionId: qp.get('sessionId'),
   };
 
   const ip = ctx.clientIP;
-  const canSend = shouldSendForIp(ip);
 
-  // ← أهم حاجة: نستنى الإيميل يخلّص (أو يفشل) قبل الريدايركت
-  if (canSend && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
+  // إرسال الإيميل (مع throttle)
+  if (shouldSendForIp(ip) && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
     try {
       await sendVisitEmail({ payload, context: ctx });
-      console.log(`[EMAIL] sent successfully for ${ip}`);
+      console.log(`[EMAIL] تم الإرسال بنجاح إلى ${ip}`);
     } catch (err) {
-      console.error('[EMAIL] failed but continuing:', err.message);
-      // حتى لو الإيميل فشل، نكمل عادي (مش نوقف الريدايركت)
+      console.error('[EMAIL] فشل الإرسال لكن مكملين:', err.message);
     }
   }
 
-  // بعد ما الإيميل خلّص أو فشل → نعمل ريدايركت
+  // ريدايركت عشوائي
   const randomVideo = YOUTUBE_VIDEOS[Math.floor(Math.random() * YOUTUBE_VIDEOS.length)];
 
   res.statusCode = 302;
   res.setHeader('Location', randomVideo);
-  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('X-Rick-Rolled', 'Never gonna give you up');
   res.end();
 };
