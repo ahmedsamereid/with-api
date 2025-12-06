@@ -5,16 +5,20 @@ const { getVisitContext, isPrivateIP, hashSha256, escapeHTML, shouldSendForIp } 
 const { sendVisitEmail } = require('../lib/email');
 
 module.exports = async (req, res) => {
-  if (req.method !== 'GET') {
+  // لو عايز تسمح بـ HEAD كمان، سيبه يعدّي 200 من غير إرسال
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.statusCode = 405;
     return res.end('Method Not Allowed');
   }
 
   const ctx = getVisitContext(req);
 
-  // إعداد Payload من Query Params فقط (من غير أي عرض للمستخدم)
-  const urlObj = new URL(`https://${req.headers.host}${req.url || '/'}`);
+  // إعداد Payload من Query Params فقط
+  // (هنا استخدمنا البروتوكول من الهيدر لو متاح حرصًا)
+  const proto = String(req.headers['x-forwarded-proto'] || 'https');
+  const urlObj = new URL(`${proto}://${req.headers.host}${req.url || '/'}`);
   const qp = urlObj.searchParams;
+
   const payload = {
     utm: {
       source: qp.get('utm_source') || null,
@@ -27,14 +31,13 @@ module.exports = async (req, res) => {
     sessionId: qp.get('sessionId') || null,
   };
 
-  // تهدئة الإرسال حسب الـ IP
+  // تهدئة الإرسال حسب الـ IP + شرط وجود المتغيرات السرية
   const ip = ctx.clientIP;
   const canSend = shouldSendForIp(ip);
   if (canSend && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
     (async () => {
       try {
         await sendVisitEmail({ payload, context: ctx });
-        // مفيش أي إشارة للمستخدم — فقط لوج داخلي
         console.log(`[EMAIL] sent (silent) for ${ip}`);
       } catch (err) {
         console.error('[EMAIL] failed:', err.message);
@@ -42,13 +45,13 @@ module.exports = async (req, res) => {
     })();
   }
 
-  // نجمع بعض معلومات عامة فقط للعرض (من غير ذكر الإيميل إطلاقًا)
+  // معلومات عامة للواجهة (من غير أي تلميح عن الإرسال)
   const now = new Date();
   const userAgent = req.headers['user-agent'] || 'Unknown';
   const acceptLang = req.headers['accept-language'] || 'Unknown';
   const fingerprintHash = hashSha256(`${ctx.clientIP}\n${userAgent}\n${acceptLang}`);
 
-  // (اختياري) Geolocation من ipapi لو IP عام — لكن مش هنذكر إرسال الإيميل
+  // (اختياري) Geolocation من ipapi لو IP عام
   let ipGeo = { city: null, region: null, country_name: null, latitude: null, longitude: null, org: null, message: null };
   if (!isPrivateIP(ctx.clientIP) && ctx.clientIP) {
     try {
@@ -62,10 +65,12 @@ module.exports = async (req, res) => {
         ipGeo.longitude = data.longitude || null;
         ipGeo.org = data.org || data.asn || null;
       }
-    } catch {}
+    } catch {
+      // تجاهل أي أخطاء في الـ fetch علشان الواجهة ما تتأثرش
+    }
   }
 
-  // واجهة بسيطة من غير أي “Hints” عن وجود إرسال
+  // واجهة بسيطة (بدون أي ذكر للإيميل)
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.end(`<!doctype html>
 <html lang="ar">
