@@ -1,0 +1,16 @@
+
+{
+  "name": "with-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel",
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "nodemailer": "^6.9.8"
+  }
+}
