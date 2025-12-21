@@ -11,14 +11,8 @@ const {
 const { sendVisitEmail } = require('../lib/email');
 
 const YOUTUBE_VIDEOS = [
-  'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-  'https://www.youtube.com/watch?v=9bZkp7q19f0',
-  'https://www.youtube.com/watch?v=kJQP7kiw5Fk',
-  'https://www.youtube.com/watch?v=OPf0YbXqDm0',
-  'https://www.youtube.com/watch?v=CevxZvSJLk8',
-  'https://www.youtube.com/watch?v=kffacxfA7G4',
-  'https://www.youtube.com/watch?v=MtN1YnoL46Q',
-  'https://www.youtube.com/watch?v=j5a0jTc9S10',
+  'https://youtu.be/N10v22s86LY?si=Cz-7ODdz-xpayP7W'
+
 ];
 
 module.exports = async (req, res) => {
