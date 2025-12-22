@@ -11,7 +11,7 @@ const {
 const { sendVisitEmail } = require('../lib/email');
 
 const YOUTUBE_VIDEOS = [
-  'https://youtu.be/N10v22s86LY?si=Cz-7ODdz-xpayP7W'
+  'https://www.youtube.com/watch?v=92mVOhGgOu8'
 
 ];
 
