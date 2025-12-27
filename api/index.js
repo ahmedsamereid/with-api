@@ -11,7 +11,7 @@ const {
 const { sendVisitEmail } = require('../lib/email');
 
 const YOUTUBE_VIDEOS = [
-  'https://www.tiktok.com/@mahmoud.khairy83/video/7587088392802979093'
+  'https://youtu.be/y1tXMlyS4d0?si=5vWRO45IoGOUhkcv'
 
 ];
 
